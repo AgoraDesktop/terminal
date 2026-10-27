@@ -1,0 +1,13 @@
+Build directory: every build artefact goes here
+/build/
+
+Compiled objects and libraries
+*.o
+*.so
+*.so.*
+*.a
+
+Editor / OS noise
+*~
+.DS_Store
+compile_commands.json
