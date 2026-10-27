@@ -55,7 +55,8 @@ Three probes, none of which needs a compositor:
 `/tmp/terminal-view.ppm` and `/tmp/terminal-draw.ppm` are written by the first two, so the pixels can be checked by
 eye as well as by arithmetic.
 
-**Four bugs these probes found, each of which would have shown as "the terminal is broken" on a person's screen:**
+**Six bugs these probes found, each of which would have shown as "the terminal is broken" on a person's screen —
+and three of them were found by the FIRST LIVE RUN, which is why the probes were extended afterwards:**
 
 1. **The fill colour space.** `CGContextSetFillColor` reads its components in whatever space the context was last
    told it is filling with, and a bitmap context's default is DEVICE GRAY — so an RGBA ground of `(0,0,0,1)` painted
@@ -69,6 +70,19 @@ eye as well as by arithmetic.
    `pos < count`, not `pos > 0`.
 4. **A monospace face has no CJK.** The renderer grew a fallback chain (`CTFontCreateForString`, nine slots): without
    it every non-Latin character was silently dropped.
+5. **`Enter` worked and nothing else did.** `NSView -inputContext` answers a context only for a view that conforms to
+   `NSTextInput`, and `-interpretKeyEvents:` hands the event to that context — so a terminal view without the protocol
+   typed into a nil context, silently. `Enter` survived because it takes the `-doCommandBySelector:` path, which is
+   plain `NSResponder`. The view is a text input client now, and `tests/terminal_keys.m` drives real `NSEvent`s into a
+   real shell.
+6. **The menu bar was one flat row** — "Terminal Quit Terminal Edit Copy Paste Shell" — because the items were bare
+   titles with no submenus. A bar's titles ARE menus (`-setSubmenu:`), and the commands are one level down.
+7. **The shell had no job control**, and the fault was in the pty door rather than in this application: `NSTask` opened
+   the pty's slave without `O_NOCTTY`, so when the opener has no controlling terminal — a session manager, `setsid`, a
+   service, which is how an application starts — the PARENT's session captured the pty and the child's `TIOCSCTTY`
+   (which does not steal) had nothing to take. MEASURED as `bash: cannot set terminal process group (-1)` while every
+   test run from an ordinary shell passed. Fixed in `libagora-base`; `tests/run-terminal-session.sh` now runs the
+   session probe under `setsid`, in the shape that broke.
 
 ## What is not here yet
 

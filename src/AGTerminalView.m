@@ -105,6 +105,7 @@ static BOOL fn_is_commanding(NSString *characters)
 	[_session release];
 	[_renderer release];
 	[_keyEvent release];
+	[_markedString release];
 	[super dealloc];
 }
 
@@ -206,7 +207,16 @@ static BOOL fn_is_commanding(NSString *characters)
 
 - (void)insertText:(id)string
 {
-	[_session writeString:string];
+	/* **CONFIRMED TEXT IS BYTES ON THE PTY.** The input system may hand an attributed string; a terminal writes the
+	 * characters and nothing else. This is also the door a composition ARRIVES at: `AGInputMethod` shows `´` as marked
+	 * text and then calls this with `é`, so a dead key costs one write, not two. */
+	if ([string isKindOfClass:[NSString class]]) {
+		[_session writeString:string];
+	} else if ([string respondsToSelector:@selector(string)]) {
+		[_session writeString:[string string]];
+	}
+	[_markedString release];
+	_markedString = nil;
 }
 
 /* THE FEW COMMANDS a text system produces that a terminal has an answer for, and each is the byte or the motion the
@@ -270,6 +280,83 @@ static BOOL fn_is_commanding(NSString *characters)
 {
 	(void)session;
 	[self setNeedsDisplay:YES];
+}
+
+/* ---- NSTextInput: the composition, and the four questions a candidate window asks ------------------ */
+
+/* **MARKED TEXT IS NOT WRITTEN TO THE PTY.** A dead key's accent is a COMPOSITION, not something the program should
+ * receive: writing `´` and then `é` would put both on the glass. So the mark is remembered here, and the pty hears
+ * exactly one write, from `-insertText:`, when the composition is confirmed. The consequence is stated rather than
+ * hidden: a terminal shows nothing while a composition is in flight, which is what every terminal does. */
+- (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange
+{
+	NSString *text;
+
+	(void)selectedRange;
+	text = [string isKindOfClass:[NSString class]] ? string : nil;
+	[text retain];
+	[_markedString release];
+	_markedString = text;
+}
+
+- (void)unmarkText
+{
+	[_markedString release];
+	_markedString = nil;
+}
+
+- (BOOL)hasMarkedText
+{
+	return _markedString != nil && [_markedString length] > 0;
+}
+
+- (NSRange)markedRange
+{
+	if (![self hasMarkedText]) {
+		return NSMakeRange(NSNotFound, 0);
+	}
+	return NSMakeRange(0, [_markedString length]);
+}
+
+/* THERE IS NO SELECTION IN THIS SLICE, and saying so is the honest answer: the caret is the grid's cursor, and a
+ * selection model is the next slice (`libtsm`'s `tsm_screen_selection_*` is what it will be built on). */
+- (NSRange)selectedRange
+{
+	return NSMakeRange(NSNotFound, 0);
+}
+
+- (NSArray *)validAttributesForMarkedText
+{
+	return [NSArray array];
+}
+
+- (NSAttributedString *)attributedSubstringFromRange:(NSRange)range
+{
+	(void)range;
+	return nil;
+}
+
+- (NSUInteger)characterIndexForPoint:(NSPoint)point
+{
+	(void)point;
+	return NSNotFound;
+}
+
+/* **THE CARET'S RECTANGLE, which is where a candidate window would go.** Apple's door answers in SCREEN coordinates;
+ * this tier has no such conversion (`NSWindow` has no `-convertRectToScreen:`), so it answers in the WINDOW's — the
+ * same coordinates every other window-placed rectangle in this tree uses — and says so rather than inventing an
+ * offset. A candidate window is the slice that will need the difference. */
+- (NSRect)firstRectForCharacterRange:(NSRange)range
+{
+	AGTerminalGrid *grid = [_session grid];
+	CGFloat cellWidth = [_renderer cellWidth];
+	CGFloat cellHeight = [_renderer cellHeight];
+	CGFloat x = (CGFloat)[grid cursorColumn] * cellWidth;
+	CGFloat top = NSHeight([self bounds]) - (CGFloat)([grid cursorRow] + 1) * cellHeight;
+	NSRect caret = NSMakeRect(x, top, MAX(1.0, cellWidth), cellHeight);
+
+	(void)range;
+	return [self convertRect:caret toView:nil];
 }
 
 /* ---- copy and paste, which are menu actions ---------------------------------------------------- */

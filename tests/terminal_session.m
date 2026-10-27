@@ -129,13 +129,28 @@ int main(void)
 	[session setDelegate:watcher];
 	check([grid columns] == 80 && [grid rows] == 24, "with the screen it was asked for");
 
-	check([session startWithShell:@"/bin/sh"], "a shell starts on a pty");
+	check([session startWithShell:@"/bin/bash"], "a LOGIN bash starts on a pty");
 	if (![session isRunning]) {
 		printf("\nterminal_session: the shell did not start, so nothing else can be checked\n");
 		[watcher release];
 		[session release];
 		[pool release];
 		return 1;
+	}
+
+	/* 0. **JOB CONTROL IS THE CONTROLLING TERMINAL, AND NOTHING ELSE PROVES IT.** A shell whose slave is not its
+	 * controlling terminal still ECHOES and still answers `stty size` — both come from the line discipline — but it
+	 * cannot set its own process group as the foreground one, and says so: `bash: cannot set terminal process group
+	 * (-1): Inappropriate ioctl for device` / `bash: no job control in this shell`. MEASURED on the application's
+	 * first live run, where those two lines were the only thing on the screen. `ps` is the evidence, not the message:
+	 * the tty must be a real one and the shell must be its session's leader. */
+	{
+		NSString *text;
+
+		check(wait_for_text(grid, @"$", 5.0), "the shell reaches its prompt");
+		text = screen_text(grid);
+		check([text rangeOfString:@"job control"].location == NSNotFound,
+		      "and it has JOB CONTROL: no 'cannot set terminal process group' on the screen");
 	}
 
 	/* 1. THE SIZE THE CHILD INHERITS IS THE SCREEN'S, asked of the kernel with `stty`. */

@@ -27,41 +27,68 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* **THE MENU BAR EXISTS FOR FOUR ITEMS, AND THEY ARE THE ONES A TERMINAL CANNOT DO WITHOUT.** A Command key never
- * reaches a view — `NSApplication` offers it to the main menu first — so Copy, Paste, New and Quit have to be items
- * here or they do not exist. Paste is wired; Copy is the slice that needs a selection model. */
+/* **A BAR'S TITLES ARE MENUS, AND THE LEAF ROWS ARE WHAT IS INSIDE THEM.** The first version of this function added
+ * four bare titles to the main menu with no submenus, so the menu bar came out as one flat row — "Terminal  Quit
+ * Terminal  Edit  Copy  Paste  Shell" — which is not a menu bar but a list of commands pretending to be one. Every
+ * top-level item is a title whose CONTENT is a submenu (`-setSubmenu:`), and the commands live one level down.
+ *
+ * AND THE ITEMS EXIST BECAUSE A COMMAND KEY NEVER REACHES A VIEW: `NSApplication` offers the main menu first, so Copy,
+ * Paste and Quit are items here or they do not exist. */
+static NSMenuItem *fn_bar_title(NSString *title, NSMenu *submenu)
+{
+	NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:NULL keyEquivalent:@""];
+
+	[item setSubmenu:submenu];
+	return [item autorelease];
+}
+
+/* ONE ROW. A nil key means NO key equivalent, and then the mask is zeroed as well, so an empty key string can never be
+ * matched by an event that happens to carry the mask. */
+static NSMenuItem *fn_row(NSMenu *menu, NSString *title, SEL action, id target, NSString *key, NSUInteger mask)
+{
+	NSMenuItem *item = [menu addItemWithTitle:title action:action keyEquivalent:(key != nil) ? key : @""];
+
+	[item setTarget:target];
+	[item setKeyEquivalentModifierMask:((key != nil) && [key length] > 0) ? mask : 0];
+	return item;
+}
+
 static void fn_install_menu(NSApplication *application)
 {
 	NSMenu *main = [[NSMenu alloc] initWithTitle:@"Main"];
+	NSMenu *app = [[NSMenu alloc] initWithTitle:@"Terminal"];
 	NSMenu *shell = [[NSMenu alloc] initWithTitle:@"Shell"];
-	NSMenuItem *item;
+	NSMenu *edit = [[NSMenu alloc] initWithTitle:@"Edit"];
 
-	[main addItem:[[[NSMenuItem alloc] initWithTitle:@"Terminal" action:NULL keyEquivalent:@""] autorelease]];
-	item = [[NSMenuItem alloc] initWithTitle:@"Quit Terminal" action:@selector(terminate:) keyEquivalent:@"q"];
-	[item setTarget:application];
-	[main addItem:item];
-	[item release];
+	/* THE APPLICATION MENU. Apple's first item is the application's own, and this tier's NSApplication treats it the
+	 * same way: a row whose action is NULL is a title, and the rows below it are the application's. */
+	fn_row(app, @"Hide Terminal", @selector(hide:), application, @"h", NSCommandKeyMask);
+	[app addItem:[NSMenuItem separatorItem]];
+	fn_row(app, @"Quit Terminal", @selector(terminate:), application, @"q", NSCommandKeyMask);
 
-	[main addItem:[[[NSMenuItem alloc] initWithTitle:@"Edit" action:NULL keyEquivalent:@""] autorelease]];
-	item = [[NSMenuItem alloc] initWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
-	[main addItem:item];
-	[item release];
-	item = [[NSMenuItem alloc] initWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
-	[main addItem:item];
-	[item release];
+	/* THE SHELL MENU, which is where a terminal's own window commands belong: closing the window ends the session. */
+	fn_row(shell, @"Close Window", @selector(performClose:), nil, @"w", NSCommandKeyMask);
 
-	[main addItem:[[[NSMenuItem alloc] initWithTitle:@"Shell" action:NULL keyEquivalent:@""] autorelease]];
+	/* THE EDIT MENU. Copy refuses until the view has a selection and says so in its own door; Paste is wired. */
+	fn_row(edit, @"Copy", @selector(copy:), nil, @"c", NSCommandKeyMask);
+	fn_row(edit, @"Paste", @selector(paste:), nil, @"v", NSCommandKeyMask);
+
+	[main addItem:fn_bar_title(@"Terminal", app)];
+	[main addItem:fn_bar_title(@"Shell", shell)];
+	[main addItem:fn_bar_title(@"Edit", edit)];
 
 	[application setMainMenu:main];
+	[edit release];
 	[shell release];
+	[app release];
 	[main release];
 }
 
 /* **A BOUNDED RUN IS A PUMP, NOT A DEADLINE ON A METHOD THAT DOES NOT EXIST.** `NSApplication -runUntilDate:` is not
- * in this AppKit (a run loop that returns on its own is the application's business, and Workspace's subclass has its
- * own door for it), so the windowed test path drives the ordinary pump — take one event, dispatch it, breathe — and
- * stops at the deadline. The same three calls a nested run makes, which is why a probe that passes here is a probe of
- * the real dispatch path. */
+ * in this AppKit, so the windowed test path drives the ordinary pump. AND IT RUNS THE RUN LOOP FIRST, because draining
+ * the event queue alone never services the pty's `NSFileHandle` readability source: MEASURED, a bounded run with a
+ * shell printing every 100 ms drew four frames in five seconds and the screen stayed frozen while the grid behind it
+ * filled. */
 static void fn_run_for(NSApplication *application, double seconds)
 {
 	NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
@@ -70,12 +97,6 @@ static void fn_run_for(NSApplication *application, double seconds)
 		NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 		NSEvent *event;
 
-		/* **THE RUN LOOP AND THE EVENT QUEUE ARE TWO WAITS, AND THE PTY NEEDS THE FIRST ONE.** Draining the event
-		 * queue alone dispatches keys and clicks but never runs the `NSFileHandle` readability source the session's
-		 * pty hangs off — MEASURED: a bounded run with a shell printing every 100 ms drew FOUR frames in five
-		 * seconds, the four the window made for itself, and the screen stayed frozen while the grid behind it filled.
-		 * So each pass runs the loop (which is what services every source in the mode) and then drains whatever the
-		 * application put on its queue. */
 		[[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
 					 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
 		while ((event = [application nextEventMatchingMask:NSAnyEventMask

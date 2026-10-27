@@ -16,6 +16,8 @@ endif()
 
 find_package(AgoraApp CONFIG REQUIRED)
 find_package(tsm CONFIG REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
 
 # The part that has no window in it: the emulator's grid and the paint. Both the application and the headless probe
 # are built from this list, so the probe tests the same object files the window runs.
@@ -82,6 +84,13 @@ if(BUILD_TESTING)
 
   # **AND THE OTHER HALF: A REAL SHELL, A REAL PTY, AND WHAT IT PRINTED READ BACK OUT OF THE GRID.** No compositor —
   # the process half is provable on its own, and it is the half whose failures look like "the terminal is hung".
+  # **AND THE KEYS, THROUGH THE VIEW INTO A REAL SHELL** — the probe the first live run needed: `Enter` worked and
+  # nothing else did, because a view that is not an `NSTextInput` client has no input context to interpret a key with.
+  add_executable(terminal_keys tests/terminal_keys.m ${TERMINAL_CORE} src/AGTerminalSession.m src/AGTerminalView.m)
+  target_include_directories(terminal_keys PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(terminal_keys PRIVATE AgoraApp::App tsm::tsm m PkgConfig::XKBCOMMON)
+  add_test(NAME terminal-keys COMMAND terminal_keys)
+
   # THE VIEW, THROUGH THE APPKIT'S OWN DISPATCH — see the probe's header for why that is a separate claim.
   add_executable(terminal_view tests/terminal_view.m ${TERMINAL_CORE} src/AGTerminalSession.m src/AGTerminalView.m)
   target_include_directories(terminal_view PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -91,7 +100,10 @@ if(BUILD_TESTING)
   add_executable(terminal_session tests/terminal_session.m ${TERMINAL_CORE} src/AGTerminalSession.m)
   target_include_directories(terminal_session PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
   target_link_libraries(terminal_session PRIVATE AgoraApp::App tsm::tsm m)
-  add_test(NAME terminal-session COMMAND terminal_session)
+  # **AND IT RUNS WITHOUT A CONTROLLING TERMINAL**, which is how the application is launched and the only context in
+  # which the pty's O_NOCTTY bug was visible. See the runner's own header.
+  add_test(NAME terminal-session
+	   COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/run-terminal-session.sh" "$<TARGET_FILE:terminal_session>")
 endif()
 
 # ---------------------------------------------------------------------------

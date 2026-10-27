@@ -23,16 +23,24 @@
 
 #import <AppKit/NSView.h>
 #import <AppKit/NSEvent.h>
+#import <AppKit/NSTextInput.h>
 
 #import "AGTerminalSession.h"
 
 @class AGTerminalRenderer;
 
-@interface AGTerminalView : NSView <AGTerminalSessionDelegate>
+/* **`NSTextInput` IS NOT DECORATION — IT IS WHAT MAKES TYPING WORK.** `NSView -inputContext` answers a context ONLY for
+ * a view that conforms to this protocol (`NSView.m` says so in as many words), and `-interpretKeyEvents:` hands each
+ * event to that context. A terminal that did not conform was a terminal whose `-interpretKeyEvents:` was a no-op: the
+ * first live run accepted Enter (which takes the `-doCommandBySelector:` path, and that is plain `NSResponder`) and
+ * silently dropped every printable character. So the view is a text input client, and the four doors a terminal can
+ * actually answer are answered below; the rest say why not rather than pretending. */
+@interface AGTerminalView : NSView <AGTerminalSessionDelegate, NSTextInput>
 {
 	AGTerminalSession *_session;	/* RETAINED: the view is the session's owner in this slice */
 	AGTerminalRenderer *_renderer;	/* RETAINED */
 	NSEvent *_keyEvent;		/* the event being interpreted, so a command can read its modifiers */
+	NSString *_markedString;	/* RETAINED: a composition in flight, which a terminal shows by composing */
 	NSUInteger _columns;
 	NSUInteger _rows;
 }
