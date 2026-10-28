@@ -75,6 +75,11 @@ add_custom_command(TARGET Terminal POST_BUILD
 # It paints into an NSBitmapImageRep, so it runs as an ordinary ctest — the emulator and the renderer are exactly the
 # halves that do not need a window, and a pixel assertion is the only honest test of "the right ink landed in the
 # right cell".
+# **`BUILD_TESTING` HAS TO EXIST BEFORE IT IS ASKED ABOUT**, which `include(CTest)` is what makes true: it defines
+# the option (ON when a configure says nothing) and turns testing on with it, so a developer's build runs the tests
+# and the release driver's `-DBUILD_TESTING=OFF` builds none of them.
+include(CTest)
+
 if(BUILD_TESTING)
   enable_testing()
   add_executable(terminal_draw tests/terminal_draw.m ${TERMINAL_CORE})
