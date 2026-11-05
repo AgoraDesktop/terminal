@@ -93,6 +93,10 @@ static void fn_run_for(NSApplication *application, double seconds)
 {
 	NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
 
+	/* **A PUMP THE CALLER DRIVES IS STILL THE APPLICATION RUNNING, AND THE WINDOWS MUST BE PAINTED.** A bounded run
+	 * that never said so left every menu it opened undriven (`-isRunning` is what a tracking loop asks) and never
+	 * applied a window drag, whose move is made once per pass by `-updateWindows`. */
+	[application cg_beginCallerDrivenRun];
 	while ([deadline timeIntervalSinceNow] > 0.0) {
 		NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 		NSEvent *event;
@@ -105,8 +109,10 @@ static void fn_run_for(NSApplication *application, double seconds)
 							       dequeue:YES]) != nil) {
 			[application sendEvent:event];
 		}
+		[application updateWindows];
 		[pool release];
 	}
+	[application cg_endCallerDrivenRun];
 }
 
 int main(int argc, char **argv)
